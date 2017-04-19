@@ -1,0 +1,5 @@
+Cc5x
+deps
+*.asm
+*.occ
+*.hex
