@@ -1,5 +1,7 @@
 /*
 
+	A single file version of the project
+	
 	Main file. This is where the compilation starts and ends.
 	
 	by
@@ -7,10 +9,6 @@
 		Grigory Glukhov
 	
 */
-
-// No guard blocks here, as this file is not supposed to be included in any other
-
-
 
 // Standard libraries and processor type includes
 #include "deps/16F690.h"
@@ -23,10 +21,71 @@
 
 
 
-// Header includes before interrupt routine
-#include "time.h"
-#include "io.h"
-#include "motor.h"
+// Time definitions
+#pragma bit IF_TIME @ T0IF
+
+#define TIME_TICK_PERIOD	159
+#define TIME_PRESCALE		0b001	// 1:16
+#define TIME_RESET			(255 - TIME_TICK_PERIOD)	// this will make the timer overflow every tick period
+
+// Current tick (roughly 1/1580th of a second, because we want 2 ticks in 1 motor pulse (we presume motor's max pulserate is 790))
+extern unsigned long time_tick;
+
+// Initialized the timer and timer-related interrupt
+void time_init();
+
+// Is to be called on timer interrupt, this will update the tick
+void time_update();
+
+// Wait until provided number of ticks pass
+void time_wait(unsigned long);
+
+
+
+// IO definitions
+// Max size of the input string (should be of length |max legal command| + 1)
+#define IO_SIZE_IN 16
+
+// An input string buffer, is to be used by parsing functions
+extern char io_in[IO_SIZE_IN];	
+
+// Initialize everything IO-related (uart ports, control registers and interrupts)
+void io_init();
+
+// Will return pointer to the first character of input string, or 0 if still receiveing input
+const char * io_getInput();
+
+// Returns 1 if strings are the same until a becomes null
+// Will always return 1 if compares a null pointer to anything
+bit strcmp(const char * a, const char * b);
+
+// Retuns a number, represented by provided string (assumed it's base 10) or 0 if the string is garbage
+unsigned long stoi(const char *);
+
+// Simply prints the given string
+void io_print(const char *);
+
+size2 const char * toString(unsigned long);
+
+
+
+// Motor definitions
+#define MOTOR_FULL_REVOLUTION 48 //for full step
+#define MOTOR_HALF_REVOLUTION 24 //for full step
+#define MOTOR_COUNTERCLOCKWISE 1
+#define MOTOR_CLOCKWISE 0
+#define MOTOR_FULL_STEP 1
+#define MOTOR_HALF_STEP 0
+
+#pragma bit PORT_MOTOR_STEP_SIZE	@ PORTC.0	// Should be either MOTOR_FULL_STEP or MOTOR_HALF_STEP
+#pragma bit PORT_MOTOR_DIRECTION	@ PORTC.1	// Should be either MOTOR_CLOCKWISE or MOTOR_COUNTERCLOCKWISE
+#pragma bit PORT_MOTOR_STEP			@ PORTC.2	// Used internally by motor_step()
+
+// Initialize motor-related pins
+void motor_init();
+
+// Run a single step
+void motor_step();
 
 
 
@@ -75,11 +134,159 @@ interrupt int_server() {
 
 
 
-// Source file definitions
-// In standard C this would not be necessary, but Cc5x is not a standard compiler, so we assist it a little
-#include "time.c"
-#include "io.c"
-#include "motor.c"
+// Time source
+unsigned long time_tick;
+
+void time_init() {
+	time_tick = 0;
+
+	T0CS = 0;					// Timer0 will use internal oscilator
+	TMR0 = 0;					// reset timer
+	
+	OPTION.3 = 0;				// prescler is used with Timer0
+	
+	OPTION &= ~0b111;			// reset to 'xxxxx000'
+	OPTION |= TIME_PRESCALE;
+	
+	T0IE = 1;					// enable timer0 - related overflow interrupt
+}
+
+void time_update() {
+	time_tick++;
+	TMR0 = TIME_RESET;	// This will give roughly 1/790th of a second period if used with 1:32 prescale
+	IF_TIME = 0;		// reset interrupt flag
+}
+
+void time_wait(unsigned long t) {
+	unsigned long end = time_tick + t;
+	while (time_tick != end);
+}
+
+
+// IO source
+char inputPos;
+char io_in[IO_SIZE_IN];
+bit io_echo;
+
+void io_init() {
+	
+	io_echo = FALSE;
+	
+	// Enable pins, EUSART will reconfigure them as necessary
+	TRISB.6 = 1;
+	TRISB.7 = 1;
+	
+	/*
+		To calculate baud rate period:
+		T = Main oscilator time (4 MHz in our case)
+		D = Desired baud rate (9600 in our case)
+		p = period, value we're calculating
+		
+		D = T/(16 *(p+1))
+		
+		p = T/D/16-1
+		p = 4 000 000 / 6900 / 16 - 1 = 25
+	*/
+	BRGH = 1;	// Make period more precise (divide D by 16 not 64)
+	SPBRGH = 0;	// high byte of desired baud rate 
+	SPBRG = 25;	// specify our period
+	
+	TX9 = 0;	// use 8-bit characters
+	SYNC = 0;	// set it to asynchrounous transmishion
+	TXEN = 1;	// enable UART circuitry
+	
+	SPEN = 1;	// enable EUSART and automatically configure TX/CK as output
+	
+	CREN = 1;	// enable reciever circuitry
+	RX9 = 0;	// use 8-bit characters
+}
+
+const char * io_getInput() {
+	
+	CREN = 1;	// Just in case an error occured
+	
+	// Receiveing data
+	if (RCIF) {
+		if (inputPos >= IO_SIZE_IN)
+			inputPos = 0;	// silently wrap around, bad practice but functional
+
+		io_in[inputPos] = RCREG;	// read input here
+		if (io_echo)
+			TXREG = io_in[inputPos];
+		if (io_in[inputPos] == '\0' || io_in[inputPos] == '\n' || io_in[inputPos] == '\r') {
+			io_in[inputPos] = '\0';
+			inputPos = 0;
+			return io_in;
+		} else
+			inputPos++;
+	}
+	
+	return 0;
+}
+
+void io_print(const char * s) {
+	while (*s) {
+		while (!TRMT);	// wait until character is transmitted
+		TXREG = *s;
+		s++;
+	}
+}
+
+bit strcmp(const char * a, const char * b) {
+	char ac, bc;
+	while (*a) {
+		ac = *a;
+		bc = *b;
+		if (ac != bc)
+			return FALSE;	// Hit a different char
+		a++;
+		b++;
+	}
+	return TRUE;	// Hit a null-char
+}
+
+unsigned long stoi(const char * s) {
+	unsigned long r = 0;
+	while (*s) {
+		// abuse ASCII notation, numbers follow each other
+		if (*s >= '0' && *s <= '9') {
+			r *= 10;
+			r += *s - '0';
+		}
+		s++;
+	}
+	return r;
+}
+
+size2 const char * toString(unsigned long n) {
+	char str[12];	// 6 + 6, because str[5] is somehow broken (no idea why) 65535 is max value, which requires 5 chars + 1 null char
+	str[11] = '\0';
+	int i = 10;
+	int t;
+	str[i] = '0';
+	do {
+		t = n % 10;
+		str[i--] = '0' + t;
+		n /= 10;
+	} while (n);
+	return &str[i + 1];
+}
+
+
+
+// Motor source
+#define MOTOR_DELAY() time_wait(1)
+
+void motor_init() {
+	TRISC &= ~0b111;	// '11111000' for outputs at motor-related pins
+	PORTC &= ~0b111;	// 'xxxxx000' for initial value
+}
+
+void motor_step() {
+	PORT_MOTOR_STEP = 1;
+	MOTOR_DELAY();
+	PORT_MOTOR_STEP = 0;
+}
 
 
 

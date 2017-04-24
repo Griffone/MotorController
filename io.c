@@ -1,16 +1,13 @@
 #ifndef _SOURCE_IO
 #define _SOURCE_IO
 
-char io_inputIsValid;
-char io_input;
+char inputPos;
 char io_in[IO_SIZE_IN];
-const char * io_out;
+bit io_echo;
 
 void io_init() {
 	
-	io_out = "";	// This will stop io_update from outputting random garbage
-	io_input = 0;
-	io_inputIsValid = 0;
+	io_echo = FALSE;
 	
 	// Enable pins, EUSART will reconfigure them as necessary
 	TRISB.6 = 1;
@@ -32,44 +29,41 @@ void io_init() {
 	SPBRG = 25;	// specify our period
 	
 	TX9 = 0;	// use 8-bit characters
-	TXEN = 1;	// enable UART circuitry
 	SYNC = 0;	// set it to asynchrounous transmishion
+	TXEN = 1;	// enable UART circuitry
 	
+	SPEN = 1;	// enable EUSART and automatically configure TX/CK as output
 	
 	CREN = 1;	// enable reciever circuitry
 	RX9 = 0;	// use 8-bit characters
-	
-	SPEN = 1;	// enable EUSART and automatically configure TX/CK as output
 }
 
-void io_update() {
-	
-	// Transmitting data
-	if (*io_out && TRMT) {	// if io_out points to non-null char
-		TXREG = *io_out;
-		io_out++;
-	}
+const char * io_getInput() {
 	
 	CREN = 1;	// Just in case an error occured
+	
 	// Receiveing data
 	if (RCIF) {
-		if (io_input >= IO_SIZE_IN)
-			io_input = 0;	// silently wrap around, bad practice but functional
+		if (inputPos >= IO_SIZE_IN)
+			inputPos = 0;	// silently wrap around, bad practice but functional
 
-		if (io_input < IO_SIZE_IN) {
-			io_in[io_input] = RCREG;
-			if (io_in[io_input] == '\0' || io_in[io_input] == '\n' || io_in[io_input] == '\r')
-				io_inputIsValid = 1;
-			io_input++;
-		}
+		io_in[inputPos] = RCREG;	// read input here
+		if (io_echo)
+			TXREG = io_in[inputPos];
+		if (io_in[inputPos] == '\0' || io_in[inputPos] == '\n' || io_in[inputPos] == '\r') {
+			io_in[inputPos] = '\0';
+			inputPos = 0;
+			return io_in;
+		} else
+			inputPos++;
 	}
+	
+	return 0;
 }
 
 void io_print(const char * s) {
-	io_out = s;
-	
 	while (*s) {
-		while(!TRMT);
+		while (!TRMT);	// wait until character is transmitted
 		TXREG = *s;
 		s++;
 	}
@@ -77,15 +71,42 @@ void io_print(const char * s) {
 
 bit strcmp(const char * a, const char * b) {
 	char ac, bc;
-	while (*a && *b) {
+	while (*a) {
 		ac = *a;
 		bc = *b;
 		if (ac != bc)
-			return 0;	// Hit a different char
+			return FALSE;	// Hit a different char
 		a++;
 		b++;
 	}
-	return 1;	// Hit a null-char
+	return TRUE;	// Hit a null-char
+}
+
+unsigned long stoi(const char * s) {
+	unsigned long r = 0;
+	while (*s) {
+		// abuse ASCII notation, numbers follow each other
+		if (*s >= '0' && *s <= '9') {
+			r *= 10;
+			r += *s - '0';
+		}
+		s++;
+	}
+	return r;
+}
+
+size2 const char * toString(unsigned long n) {
+	char str[12];	// 6 + 6, because str[5] is somehow broken (no idea why) 65535 is max value, which requires 5 chars + 1 null char
+	str[11] = '\0';
+	int i = 10;
+	int t;
+	str[i] = '0';
+	do {
+		t = n % 10;
+		str[i--] = '0' + t;
+		n /= 10;
+	} while (n);
+	return &str[i + 1];
 }
 
 #endif // !_SOURCE_IO

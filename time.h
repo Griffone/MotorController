@@ -1,9 +1,10 @@
 /*
 
 	Timer and timer-related code.
-	
-	Includes millisecond delays and so on...
 
+	by
+		Grigory Glukhov
+	
 */
 
 #ifndef _HEAD_TIME
@@ -12,7 +13,7 @@
 #pragma bit IF_TIME @ T0IF
 
 #define TIME_TICK_PERIOD	159
-#define TIME_PRESCALE		0b010	// 1:16
+#define TIME_PRESCALE		0b001	// 1:16
 #define TIME_RESET			(255 - TIME_TICK_PERIOD)	// this will make the timer overflow every tick period
 
 // Current tick (roughly 1/1580th of a second, because we want 2 ticks in 1 motor pulse (we presume motor's max pulserate is 790))
