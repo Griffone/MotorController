@@ -511,14 +511,26 @@ void parseInput(const char * s) {
 /*           _____________  _____________ 
             |             \/             |
       +5V---|Vdd        16F690        Vss|---Gnd
-			|RA5            RA0/AN0/(PGD)|
-			|RA4/AN3            RA1/(PGC)|
+	    |RA5            RA0/AN0/(PGD)|
+	    |RA4/AN3            RA1/(PGC)|
             |RA3/!MCLR/(Vpp)  RA2/AN2/INT|
-            |RC5/CCP                  RC0|->-!STEP
+            |RC5/CCP                  RC0|->-!HSM
             |RC4                      RC1|->-DIR
-            |RC3/AN7                  RC2|->-!HSM
+            |RC3/AN7                  RC2|->-!STEP
             |RC6/AN8             AN10/RB4|
             |RC7/AN9               RB5/Rx|-<-UART_IN
  UART_OUT-<-|RB7/Tx                   RB6|
             |____________________________|                                      
 */ 
+/*           _____________  _____________ 
+            |             \/             |
+    COIL<---|PB2        PBD3517       VCC|---+6V
+    COIL<---|PB1                      VSS|
+      Gnd---|GND                       LB|
+    COIL<---|PA1                       LA|
+    COIL<---|PA2                       RC|
+      RC1->-|DIR                      INH|---Gnd
+      RC2->-|!STEP                   !HSM|-<-RC0
+            |OB                        OA|
+            |____________________________|                                      
+*/
